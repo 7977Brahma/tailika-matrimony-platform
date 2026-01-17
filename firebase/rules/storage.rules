@@ -1,0 +1,33 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper: Check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper: Check if user owns the file
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Profile Photos
+    match /profile-photos/{userId}/{imageId} {
+      // Read: Public (for match discovery)
+      allow read: if true;
+      
+      // Write: Only authenticated owner
+      allow write: if isSignedIn() && isOwner(userId)
+                   // Image validation
+                   && request.resource.contentType.matches('image/.*')
+                   // Max 5MB
+                   && request.resource.size < 5 * 1024 * 1024;
+    }
+    
+    // Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,9 +1,121 @@
-// Firebase security rules
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
     }
+
+    function isParticipant(userIds) {
+      return isSignedIn() && (request.auth.uid in userIds);
+    }
+    
+    function isSender(senderId) {
+      return isSignedIn() && request.auth.uid == senderId;
+    }
+
+    // CHATS Collection
+    match /chats/{chatId} {
+      // Read: Only participants with complete profiles
+      allow read: if isParticipant(resource.data.userIds)
+                  && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+      
+      // Create: Users can create if they include themselves and have complete profile
+      allow create: if isSignedIn() 
+                    && (request.auth.uid in request.resource.data.userIds)
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+
+      // Update: Last message updates allowed by participants with complete profiles
+      allow update: if isParticipant(resource.data.userIds)
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'chatId']);
+    }
+
+    // MESSAGES Collection
+    match /messages/{messageId} {
+        // Read: Must be sender or receiver with complete profile
+        allow read: if isSignedIn() 
+                    && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId)
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+
+        // Create: Must be sender with complete profile
+        allow create: if isSignedIn() 
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.text.size() <= 500
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.createdAt == request.time
+                      && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+
+        // Update: Mark as read only, with complete profile
+        allow update: if isSignedIn() 
+                      && (request.auth.uid == resource.data.receiverId || request.auth.uid == resource.data.senderId)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+                      && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+    }
+    // --- ADMIN ACCESS HELPERS ---
+    
+    function hasRole(role) {
+      return isSignedIn() && request.auth.token.role == role;
+    }
+
+    function isAnyAdmin() {
+      return isSignedIn() && (hasRole('primary_admin') || hasRole('secondary_admin'));
+    }
+
+    // ADMINS Collection (Metadata)
+    match /admins/{adminId} {
+      // Only Primary Admin can read/write admin metadata (assign roles)
+      // Secondary admins don't need to read this list typically in Phase 1, but maybe to know who is admin?
+      // Prompt says "Users cannot read /admins". "Only Primary Admin can modify".
+      allow read: if hasRole('primary_admin');
+      allow write: if hasRole('primary_admin');
+    }
+
+    // ADMIN LOGS
+    match /adminLogs/{logId} {
+      // Read-only for admins
+      allow read: if isAnyAdmin();
+      allow write: if false; // Logs written by Backend Admin SDK only
+    }
+
+    // USERS Collection (Updates)
+    match /users/{userId} {
+      // Standard User Access (Self)
+      allow read: if isSignedIn();
+      
+      // Write: User can only update their own profile
+      allow write: if request.auth.uid == userId
+                   // Photo enforcement (min 4, max 8)
+                   && (!request.resource.data.keys().hasAny(['photos']) 
+                       || (request.resource.data.photos is list
+                           && request.resource.data.photos.size() >= 4
+                           && request.resource.data.photos.size() <= 8))
+                   // Profile completion enforcement
+                   && (!request.resource.data.keys().hasAny(['isProfileComplete'])
+                       || (request.resource.data.photos is list
+                           && request.resource.data.photos.size() >= 4
+                           && request.resource.data.isProfileComplete == true)
+                       || (request.resource.data.photos is list
+                           && request.resource.data.photos.size() < 4
+                           && request.resource.data.isProfileComplete == false));
+    }
+
+    // DISCOVERY / MATCHES (Profile completion required)
+    match /discovery/{docId} {
+      // Users can only access discovery if their profile is complete
+      allow read: if isSignedIn() 
+                  && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+      allow write: if false; // Server-side only
+    }
+
+    // MATCHES Collection (Profile completion required)
+    match /matches/{matchId} {
+      allow read: if isSignedIn()
+                  && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+      allow write: if isSignedIn()
+                   && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isProfileComplete == true;
+    }
+
   }
 }

@@ -1,5 +1,16 @@
 {
     "name": "@tailika/logic",
     "version": "0.0.0",
-    "main": "index.js"
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "tsc"
+    },
+    "devDependencies": {
+        "@types/spark-md5": "^3.0.5",
+        "typescript": "^5.7.3"
+    },
+    "dependencies": {
+        "spark-md5": "^3.0.2"
+    }
 }

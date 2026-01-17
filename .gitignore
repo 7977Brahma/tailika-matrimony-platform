@@ -42,3 +42,6 @@ yarn-error.log*
 # Firebase
 .firebase/
 firebase-debug.log
+
+# Design Reference (Non-production assets)
+../design-reference/
